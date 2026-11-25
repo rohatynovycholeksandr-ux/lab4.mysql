@@ -1,0 +1,134 @@
+CREATE DATABASE IF NOT EXISTS office_expenses_group_db;
+USE office_expenses_group_db;
+
+CREATE TABLE departments (
+    department_id INT AUTO_INCREMENT PRIMARY KEY,
+    department_name VARCHAR(100) NOT NULL,
+    employees_count INT,
+    monthly_norm DECIMAL(10, 2)
+);
+
+CREATE TABLE expense_types (
+    expense_type_id INT AUTO_INCREMENT PRIMARY KEY,
+    type_name VARCHAR(100) NOT NULL,
+    description TEXT,
+    monthly_limit DECIMAL(10, 2)
+);
+
+CREATE TABLE expenses (
+    expense_id INT AUTO_INCREMENT PRIMARY KEY,
+    department_id INT,
+    expense_type_id INT,
+    employee_name VARCHAR(100),
+    expense_date DATE NOT NULL,
+    amount DECIMAL(10, 2) NOT NULL,
+    FOREIGN KEY (department_id) REFERENCES departments(department_id),
+    FOREIGN KEY (expense_type_id) REFERENCES expense_types(expense_type_id)
+);
+
+INSERT INTO departments (department_name, employees_count, monthly_norm) VALUES
+('Бухгалтерія', 5, 2000.00),
+('IT Відділ', 10, 3000.00),
+('Маркетинг', 8, 1500.00);
+
+INSERT INTO expense_types (type_name, description, monthly_limit) VALUES
+('Канцтовари', 'Ручки, олівці, папки, степлери', 3000.00),
+('Папір', 'Папір А4 та А3 для принтерів', 5000.00),
+('Кава та чай', 'Кава, чай, цукор та вода для офісу', 4000.00),
+('Госптовари', 'Миючі засоби та інвентар', 2000.00);
+
+INSERT INTO expenses (department_id, expense_type_id, employee_name, expense_date, amount) VALUES
+(1, 1, 'Іваненко І.І.', '2025-03-10', 800.00),
+(1, 2, 'Іваненко І.І.', '2026-02-15', 18000.00),
+(2, 3, 'Петренко П.П.', '2026-04-20', 22000.00),
+(2, 1, 'Сидоренко С.С.', '2026-06-11', 1500.00),
+(3, 4, 'Коваленко К.К.', '2026-08-05', 4500.00),
+(3, NULL, 'Коваленко К.К.', '2026-09-12', 300.00);
+
+-- 1) Найменше та найбільше значення суми витрати і граничної місячної суми
+SELECT 
+    MIN(e.amount) AS min_expense_amount,
+    MAX(e.amount) AS max_expense_amount,
+    MIN(et.monthly_limit) AS min_monthly_limit,
+    MAX(et.monthly_limit) AS max_monthly_limit
+FROM expenses e
+LEFT JOIN expense_types et ON e.expense_type_id = et.expense_type_id;
+
+-- 2) Загальна кількість витрат, кількість із заповненим полем «вид витрат» та кількість різних значень
+SELECT 
+    COUNT(*) AS total_expenses,
+    COUNT(expense_type_id) AS filled_expense_types,
+    COUNT(DISTINCT expense_type_id) AS distinct_expense_types
+FROM expenses;
+/* Пояснення відмінності трьох чисел:
+   1. COUNT(*) рахує всі рядки таблиці, включаючи записи, де вид витрат не вказано (NULL).
+   2. COUNT(expense_type_id) рахує лише ті рядки, де поле виду витрат заповнене (ігнорує NULL).
+   3. COUNT(DISTINCT expense_type_id) рахує тільки унікальні (неповторювані) види витрат. */
+
+-- 3) Середнє значення суми витрати, середнє значення граничної місячної суми та відношення між ними
+SELECT 
+    ROUND(AVG(e.amount), 2) AS avg_expense_amount,
+    ROUND(AVG(et.monthly_limit), 2) AS avg_monthly_limit,
+    ROUND(AVG(e.amount) / NULLIF(AVG(et.monthly_limit), 0), 4) AS ratio
+FROM expenses e
+LEFT JOIN expense_types et ON e.expense_type_id = et.expense_type_id;
+
+-- 4) Для кожного виду витрат: сума витрат та найбільше значення граничної місячної суми
+SELECT 
+    et.type_name AS expense_type,
+    SUM(e.amount) AS total_amount,
+    MAX(et.monthly_limit) AS max_monthly_limit
+FROM expenses e
+JOIN expense_types et ON e.expense_type_id = et.expense_type_id
+GROUP BY et.type_name;
+
+-- 5) Групування витрат за роком дати витрати та кількість записів у кожному році
+SELECT 
+    YEAR(expense_date) AS expense_year,
+    COUNT(*) AS records_count
+FROM expenses
+GROUP BY YEAR(expense_date)
+ORDER BY expense_year;
+
+-- 6) Для кожного виду витрат: кількість та сума витрат за записами у вказаному діапазоні суми
+SELECT 
+    et.type_name AS expense_type,
+    COUNT(*) AS expenses_count,
+    SUM(e.amount) AS total_amount
+FROM expenses e
+JOIN expense_types et ON e.expense_type_id = et.expense_type_id
+WHERE e.amount BETWEEN 500 AND 5000
+GROUP BY et.type_name;
+
+-- 7) Для кожного виду витрат: сума витрат, залишивши групи, де ця сума належить указаному діапазону
+SELECT 
+    et.type_name AS expense_type,
+    SUM(e.amount) AS total_amount
+FROM expenses e
+JOIN expense_types et ON e.expense_type_id = et.expense_type_id
+GROUP BY et.type_name
+HAVING SUM(e.amount) BETWEEN 2000 AND 20000;
+
+-- 8) Сума витрат за видами (ліміт поза діапазоном), залишити групи із сумою > вказаної, за спаданням
+SELECT 
+    et.type_name AS expense_type,
+    SUM(e.amount) AS total_amount
+FROM expenses e
+JOIN expense_types et ON e.expense_type_id = et.expense_type_id
+WHERE et.monthly_limit NOT BETWEEN 2500 AND 3500
+GROUP BY et.type_name
+HAVING SUM(e.amount) > 3000
+ORDER BY total_amount DESC;
+
+-- 9) Для кожного відділу: сума витрат за рік, річна норма та % використання (> вказаного значення), за спаданням
+SELECT 
+    d.department_name,
+    SUM(e.amount) AS yearly_expenses,
+    (d.monthly_norm * 12) AS yearly_norm,
+    ROUND((SUM(e.amount) / (d.monthly_norm * 12)) * 100, 2) AS usage_percent
+FROM expenses e
+JOIN departments d ON e.department_id = d.department_id
+WHERE YEAR(e.expense_date) = 2026
+GROUP BY d.department_id, d.department_name, d.monthly_norm
+HAVING usage_percent > 50
+ORDER BY usage_percent DESC;
